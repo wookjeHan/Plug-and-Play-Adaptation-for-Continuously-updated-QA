@@ -1,16 +1,13 @@
-outputs
-performance_check_init.py
-performance_check_v1.py
-performance_check.py
-run.sh
-prompt_check.py
-OpenAI
-check_latency.py
-test.py
-curie_latency_cdf.png
-curie_plot.png
-davinci_latency_cdf.png
-latency_cdf.png
+embedding_memory_zsREwith_C_4to1
+embedding_memory_zsREwith_D_4to1
+embedding_memory_zsREwith_E_4to1
+embedding_memory_zsREwith_E_4to1cuda:1
+embedding_memory_zsREwith_E_4to1cuda:2
+embedding_memory_zsREwith_E_4to1cuda:3
+embedding_memory_zsREwith_F_4to1cuda:0
+embedding_memory_zsREwith_F_4to1cuda:1
+embedding_memory_zsREwith_F_4to1cuda:2
+embedding_memory_zsREwith_F_4to1cuda:3
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
