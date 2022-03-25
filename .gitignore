@@ -1,13 +1,9 @@
-embedding_memory_zsREwith_C_4to1
-embedding_memory_zsREwith_D_4to1
-embedding_memory_zsREwith_E_4to1
-embedding_memory_zsREwith_E_4to1cuda:1
-embedding_memory_zsREwith_E_4to1cuda:2
-embedding_memory_zsREwith_E_4to1cuda:3
-embedding_memory_zsREwith_F_4to1cuda:0
-embedding_memory_zsREwith_F_4to1cuda:1
-embedding_memory_zsREwith_F_4to1cuda:2
-embedding_memory_zsREwith_F_4to1cuda:3
+checkpoints
+lightning_logs
+outputs
+kill.sh
+run.sh
+test.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
