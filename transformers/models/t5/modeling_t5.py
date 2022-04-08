@@ -1658,7 +1658,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         return_dict=None,
         switch_labels=None,
         switches=None,
-        router_phase=0,
     ):
         r"""
         labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`):
@@ -1712,13 +1711,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
 
         hidden_states = encoder_outputs[0]
         # get avg_embedding for ours model(This will be used later when evaluating to decide whether we should turn on / off switch)
-        avg_embedding = None
-        if router_phase == 1:
-            ones = torch.ones_like(input_ids)
-            zeros = torch.zeros_like(input_ids)
-            mask_ids = torch.where(input_ids == 0, zeros, ones)
-            masked_hidden_states = hidden_states*mask_ids.unsqueeze(2)
-            avg_embedding = torch.mean(masked_hidden_states, dim=1)
 
         if self.model_parallel:
             torch.cuda.set_device(self.decoder.first_device)
@@ -1810,8 +1802,52 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
-            avg_embedding=avg_embedding
         )
+    def expert_prepare(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        encoder_outputs=None,
+        head_mask=None,
+        inputs_embeds=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if encoder_outputs is None:
+            # Convert encoder inputs in embeddings if needed
+            encoder_outputs = self.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                head_mask=head_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                switches=None
+            )
+
+        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
+            encoder_outputs = BaseModelOutput(
+                last_hidden_state=encoder_outputs[0],
+                hidden_states=encoder_outputs[1] if len(
+                    encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(
+                    encoder_outputs) > 2 else None,
+            )
+
+        hidden_states = encoder_outputs[0]
+        # get avg_embedding for ours model(This will be used later when evaluating to decide whether we should turn on / off switch)
+        ones = torch.ones_like(input_ids)
+        zeros = torch.zeros_like(input_ids)
+        mask_ids = torch.where(input_ids == 0, zeros, ones)
+        masked_hidden_states = hidden_states*mask_ids.unsqueeze(2)
+        avg_embedding = torch.mean(masked_hidden_states, dim=1)
+        return encoder_outputs, avg_embedding
 
     def prepare_inputs_for_generation(
         self, input_ids, past=None, attention_mask=None, use_cache=None, encoder_outputs=None, **kwargs
@@ -1827,7 +1863,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             "attention_mask": attention_mask,
             "use_cache": use_cache,
             "switches": kwargs.get('switches'),
-            "router_phase": 0,
         }
 
     def _reorder_cache(self, past, beam_idx):

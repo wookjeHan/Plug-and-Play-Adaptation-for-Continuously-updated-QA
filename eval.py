@@ -52,6 +52,16 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, default=None, required=True)
     parser.add_argument("--max_source_len", type=int, default=25)
     parser.add_argument("--max_target_len", type=int, default=10)
+    
+    # args for Eval When LoRA
+    parser.add_argument("--lora_rank", type=int, default=256)
+    parser.add_argument("--lora_attn_alpha", type=int, default=256*4)
+    parser.add_argument("--attn_lora_rank", type=int, default=256)
+    parser.add_argument("--lora_attn_attn_alpha", type=int, default=256*4)
+    parser.add_argument("--lora_dropout", type=float, default=0.1)
+    parser.add_argument("--lora_r_dropout", type=float, default=0.1)
+    # This argument is only of Ours+LoRA Method
+    parser.add_argument("--ours_threshold", type=float, default=0.9)
 
     args = parser.parse_args()
 

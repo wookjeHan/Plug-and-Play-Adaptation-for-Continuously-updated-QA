@@ -25,9 +25,12 @@ def load_model_tokenizer(args):
         assert args.checkpoint is not None and os.path.exists(
             args.checkpoint), "Must set model's valid checkpoint to be evaluated"
 
-        tmp = torch.load(args.checkpoint)
-        args.lora_expert_num = tmp["lora_expert_num"] + \
-            1 if "lora_expert_num" in tmp else 2
+        model = torch.load(args.checkpoint, map_location=torch.device("cpu"))
+        if args.mode == "update" and args.method != "ft" and args.method != "rec":
+            args.lora_expert_num = model["lora_expert_num"] + \
+                1 if "lora_expert_num" in model else 2
+        else:
+            args.lora_expert_num = model["lora_expert_num"] if "lora_expert_num" in model else 2
         model = QAModel.load_from_checkpoint(
             args.checkpoint, strict=False, model_name="google/t5-large-ssm", tokenizer=tokenizer, args=args)
         return model, tokenizer
@@ -38,7 +41,8 @@ class QAModel(pl.LightningModule):
     def __init__(self, model_name, tokenizer, args):
         super().__init__()
         self.config = T5Config.from_pretrained(model_name, return_dict=True)
-        if args.mode == "update" and (args.method == "LoRA" or args.method == "Ours+LoRA"):
+        
+        if (args.mode != "pretrain"):
             self.config.is_lora = args.lora_rank
             self.config.lora_attn_alpha = args.lora_attn_alpha
             self.config.lora_attn_attn_alpha = args.lora_attn_attn_alpha
@@ -56,16 +60,15 @@ class QAModel(pl.LightningModule):
         self.embedding_memory = []
         self._type = None
 
-    def forward(self, input_ids, attention_mask, labels=None, switches=None, router_phase=0):
+    def forward(self, input_ids, attention_mask, labels=None, switches=None):
         output = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,
             switches=switches,
-            router_phase=router_phase,
         )
 
-        return output.loss, output.logits, output.avg_embedding
+        return output.loss, output.logits
 
     def training_step(self, batch, batch_idx):
         input_ids = batch["input_ids"]
@@ -86,8 +89,11 @@ class QAModel(pl.LightningModule):
             switch_labels = torch.tensor(
                 [0 for i in range(input_ids.shape[0])], device=self.device)
 
-        loss, _, avg_embedding = self(input_ids, attention_mask,
-                                      labels, switches=switch_labels, router_phase=1 if self.args.mode == "update" and self.args.method == "Ours+LoRA" else 0)
+        _, avg_embedding = _, avg_embedding = self.model.expert_prepare(
+                        input_ids=input_ids, attention_mask=attention_mask)
+        loss, _ = self(input_ids, attention_mask,
+                                      labels, switches=switch_labels)
+        
         loss = torch.mean(loss)
 
         return {"loss": loss, "avg_embedding": avg_embedding}
@@ -117,27 +123,24 @@ class QAModel(pl.LightningModule):
                     return torch.cat(gather_t)
 
                 self.embedding_memory.append(gather_list_and_concat(temp))
-
     def validation_step(self, batches, batch_idx):
         output = []
         for dataset in batches.keys():
             batch = batches[dataset]
             input_ids = batch["input_ids"]
             attention_mask = batch["attention_mask"]
-            labels = batch["labels"]
             # If LoRA we should switch all experts
             if self.args.mode == "update" and self.args.method == "LoRA":
                 switches = torch.tensor(
                     [-1 for i in range(input_ids.shape[0])], device=self.device
                 )
             elif self.args.mode == "update" and self.args.method == "Ours+LoRA":
-                # TODO CHANGE
                 switches = torch.tensor(
                     [-1 for i in range(input_ids.shape[0])], device=self.device
                 )
                 if len(self.embedding_memory) > 0:
-                    _, _, avg_embedding = self(
-                        input_ids=input_ids, attention_mask=attention_mask, labels=labels, switches=switches, router_phase=1)
+                    _, avg_embedding = self.model.expert_prepare(
+                        input_ids=input_ids, attention_mask=attention_mask)
                     norm = avg_embedding.norm(p=2, dim=1, keepdim=True)
                     pred = avg_embedding.div(norm)  # (batch, hidden_size)
 
@@ -210,7 +213,7 @@ class QAModel(pl.LightningModule):
             inverse_norm_scores) / len(inverse_norm_scores)
         harmonic_scores = 1 / avg_inverse_norm_scores
         for i in range(dataset_num):
-            self.log("{}'s acc(normalized)".format(self.args.dev_path[i]), correct_normals[i]/total_nums[i], on_step=False,
+            self.log("{}'s acc(normalized)".format(self.args.dev_path[i].split("/")[-1]), correct_normals[i]/total_nums[i], on_step=False,
                      on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("harmonic_score(normalized)", harmonic_scores, on_step=False,
                  on_epoch=True, prog_bar=True, sync_dist=True)
@@ -221,7 +224,7 @@ class QAModel(pl.LightningModule):
             batch = batches[dataset]
             input_ids = batch["input_ids"]
             attention_mask = batch["attention_mask"]
-            if self._type == "ft" or "rec":
+            if self._type == "ft" or self._type == "rec":
                 switches = torch.tensor(
                     [0 for j in range(len(batch['input_ids']))], device=self.device)
             elif self._type == "lora":
@@ -229,8 +232,39 @@ class QAModel(pl.LightningModule):
                     [-1 for j in range(len(batch['input_ids']))], device=self.device)
             else:
                 switches = torch.tensor(
-                    [self.config.lora_expert_num - 1 for j in range(len(batch['input_ids']))], device=self.device)
+                        [-1 for i in range(input_ids.shape[0])], device=self.device
+                    )
+                if len(self.embedding_memory) > 0:
+                    _, avg_embedding = self.model.expert_prepare(
+                        input_ids=input_ids, attention_mask=attention_mask)
+                    norm = avg_embedding.norm(p=2, dim=1, keepdim=True)
+                    pred = avg_embedding.div(norm)  # (batch, hidden_size)
 
+                    scores = []
+                    for tensor in self.embedding_memory:
+                        score_cand = torch.matmul(
+                            pred, tensor.transpose(1, 0).to(self.device))
+                        mx, ind = torch.max(score_cand, dim=1)  # (batch, )
+                        # score is list of tensor which shape is (batch,)
+                        scores.append(mx)
+                    mx_scores = []
+                    for i in range(input_ids.shape[0]):
+                        mx = 0
+                        index_of_mx = 0
+                        for ind, j in enumerate(scores):
+                            if j[i] > mx:
+                                mx = j[i]
+                                index_of_mx = ind
+                        mx_scores.append((mx, index_of_mx))
+                    switches = []
+                    for i in mx_scores:
+                        if i[0] >= self.args.ours_threshold:
+                            switches.append(i[1] + 1)
+                        else:
+                            switches.append(0)
+                    switches = torch.tensor(
+                        switches, device=self.device, requires_grad=False
+                    )
             generated_ids = self.model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -279,15 +313,18 @@ class QAModel(pl.LightningModule):
                      correct_bias=True)
 
     def on_save_checkpoint(self, checkpoint):
-        if self.args.mode == "update" and self.args.method == "Ours+LoRA":
+        if self.args.mode != "pretrain" and (self.args.method == "Ours+LoRA" or self.args.method == "LoRA"):
             checkpoint["embedding_memory"] = self.embedding_memory
             checkpoint["lora_expert_num"] = self.config.lora_expert_num
-        if self.args.mode == "update":
+        if self.args.mode != "pretrain":
             checkpoint["type"] = self.args.method
         else:
             checkpoint["type"] = "ft"
 
     def on_load_checkpoint(self, checkpoint):
-        if self.args.mode == "update" and self.args.method == "Ours+LoRA":
+        if "embedding_memory" in checkpoint:
             self.embedding_memory = checkpoint["embedding_memory"]
-        self._type = checkpoint["type"]
+        else:
+            self.embedding_memory = []
+        if "type" in checkpoint:
+            self._type = checkpoint["type"]

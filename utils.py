@@ -36,7 +36,7 @@ def normalize_answer(s):
 def extract_questions_and_answers(json_dataset):
     data_rows = []
 
-    for json_data in json_dataset[:1320]:
+    for json_data in json_dataset:
         question = json_data['question']
         answer_text = json_data['answer']
         aliases = json_data["aliases"]
@@ -51,6 +51,7 @@ def extract_questions_and_answers(json_dataset):
 def prepare_dataset(args, tokenizer):
     train_path = args.train_path if "train_path" in args else None
     dev_paths = args.dev_path
+
     # train_path is None if we are evaluating..
     if train_path is not None:
         with open(train_path, 'r') as f:
@@ -64,13 +65,15 @@ def prepare_dataset(args, tokenizer):
     for dev_path in dev_paths:
         with open(dev_path, 'r') as f:
             dev_dataset = json.load(f)
-            dev_datasets.append(dev_dataset[:1000])
+            dev_datasets.append(dev_dataset)
             size = len(dev_dataset)
             print(size)
             f.close()
 
     dev_df = [extract_questions_and_answers(
         dev_dataset) for dev_dataset in dev_datasets]
+    dev_df = [ele_dev_df.sample(
+        n=1000, random_state=42, replace=False) for ele_dev_df in dev_df]
     data_module = QADataModule(
         train_df=train_df if train_path is not None else dev_df, test_df=dev_df, tokenizer=tokenizer, batch_size=args.batch_size, source_max_token_len=args.max_source_len, target_max_token_len=args.max_target_len)
     return data_module
