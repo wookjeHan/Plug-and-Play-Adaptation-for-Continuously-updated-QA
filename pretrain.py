@@ -76,6 +76,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, choices = ["nq","zsRE"], default = "nq")
     parser.add_argument("--n_gpus", type=int, default=4)
 
     parser.add_argument("--train_path", type=str,

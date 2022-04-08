@@ -31,7 +31,6 @@ def main(args):
 
     # setup dataModule
     data_module.setup()
-
     trainer = pl.Trainer(
         max_epochs=0,
         gpus=args.n_gpus,
@@ -44,6 +43,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, choices = ["nq","zsRE"], default = "nq")
     parser.add_argument("--n_gpus", type=int, default=4)
 
     parser.add_argument("--dev_path", '--list', nargs='+', type=str,
@@ -53,6 +53,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_source_len", type=int, default=25)
     parser.add_argument("--max_target_len", type=int, default=10)
     
+    parser.add_argument("--adapter", type=str, choices=[
+                        "LoRA", "K-adapter", "None"], default="LoRA")
     # args for Eval When LoRA
     parser.add_argument("--lora_rank", type=int, default=256)
     parser.add_argument("--lora_attn_alpha", type=int, default=256*4)

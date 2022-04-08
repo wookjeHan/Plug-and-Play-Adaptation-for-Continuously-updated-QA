@@ -49,82 +49,68 @@ def main(args):
         accelerator="ddp",
         check_val_every_n_epoch=args.validation_freq
     )
-
-    model.freeze()
+    # Let's check what to freeze or not
+    if args.freeze_orig_param == "Encoder":
+        # Freeze all encoder
+        if args.adapter == "None" or args.adapter == "K-adapter":
+            for n,p in model.named_parameters():
+                if "encoder" in n:
+                    p.requires_grad = False
+        # Freeze all encoder as there is no LoRA in encoder & freeze LoRA's 0 expert
+        elif args.adapter == "LoRA":
+            for n,p in model.named_parameters():
+                if "encoder" in n or ("lora" in n and ".0.weight" in n):
+                    p.requires_grad = False
+    
+    elif args.freeze_orig_param == "Decoder":
+        # freeze all decoder
+        if args.adapter == "None":
+            for n,p in model.named_parameters():
+                if "decoder" in n:
+                    p.requires_grad = False
+        # freeze all decoder but not adapter's
+        elif args.adapter == "LoRA":
+            for n,p in model.named_parameters():
+                if "decoder" in n and not ("lora" in n and ".{}.weight".format(model.config.lora_expert_num-1) in n):
+                    p.requires_grad = False
+        # After you check Your K-adapter You must fill it TODO
+        else:
+            #TODO
+            pass
+    
+    elif args.freeze_orig_param == "All":
+        # Just freeze all
+        model.freeze()
+        # unfreeze only adapter params(excluding previous experts)
+        if args.adapter == "LoRA":
+            for n,p in model.named_parameters():
+                if "lora" in n and ".{}.weight".format(model.config.lora_expert_num-1) in n:
+                    p.requires_grad = True
+        else:
+            #TODO
+            pass
+    #freeze only for LoRA ".0.weight" as it is not real params
+    else:
+        if args.adapter == "LoRA":
+            for n,p in model.named_parameters():
+                if "lora" in n and ".0.weight" in n:
+                    p.requires_grad = False
+    
     no_decay = ['bias', 'layer_norm.weight']
-
-    # When Finetuning or RecAdam, LoRA Parameters should not be updated
-    if args.method == "ft" or args.method == "rec":
-        for n, p in model.named_parameters():
-            if not "lora" in n:
-                p.requires_grad = True
-        if args.method == "ft":
-            optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in model.named_parameters() if (not 'lora' in n) and not any(nd in n for nd in no_decay)],
-                    'lr': args.lr,
-                    'weight_decay':args.weight_decay
-                },
-                {
-                    "params": [p for n, p in model.named_parameters() if (not 'lora' in n) and any(nd in n for nd in no_decay)],
-                    'lr': args.lr,
-                    'weight_decay':0
-                }
-            ]
-        # When RecAdam we must save original model's parameters.
-        elif args.method == "rec":
-            orig_model, _ = load_model_tokenizer(args)
-            optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in model.named_parameters() if
-                               not any(nd in n for nd in no_decay) and "lora" not in n],
-                    "weight_decay": args.weight_decay,
-                    "anneal_w": args.rec_anneal_w,
-                    "pretrain_params": [p_p for p_n, p_p in orig_model.named_parameters() if
-                                        not any(nd in p_n for nd in no_decay) and "lora" not in p_n]
-                },
-                {
-                    "params": [p for n, p in model.named_parameters() if
-                               any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                    "anneal_w": args.rec_anneal_w,
-                    "pretrain_params": [p_p for p_n, p_p in orig_model.named_parameters() if
-                                        any(nd in p_n for nd in no_decay) and "lora" not in p_n]
-                }
-            ]
-    # When LoRA
-    elif args.method == "LoRA":
-        for n, p in model.named_parameters():
-            if "lora" in n and ".0.weight" not in n:
-                p.requires_grad = True
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in model.named_parameters() if ("lora" in n and ".0.weight" not in n) and not any(nd in n for nd in no_decay)],
-                'lr': args.lr,
-                'weight_decay': args.weight_decay
-            },
-            {
-                "params": [p for n, p in model.named_parameters() if ('lora' in n and ".0.weight" not in n) and any(nd in n for nd in no_decay)],
-                'lr': args.lr,
-                'weight_decay':0
-            }
-        ]
-    elif args.method == "Ours+LoRA":
-        for n, p in model.named_parameters():
-            if "lora" in n and ".{}.weight".format(model.config.lora_expert_num-1) in n:
-                p.requires_grad = True
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in model.named_parameters() if ('lora' in n and ".{}.weight".format(model.config.lora_expert_num-1) in n) and not any(nd in n for nd in no_decay)],
-                'lr': args.lr,
-                'weight_decay':args.weight_decay
-            },
-            {
-                "params": [p for n, p in model.named_parameters() if ('lora' in n and ".{}.weight".format(model.config.lora_expert_num-1) in n) and any(nd in n for nd in no_decay)],
-                'lr': args.lr,
-                'weight_decay':0
-            }
-        ]
+    
+    #Set Optimizer grouped Parameters
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay)],
+            'lr': args.lr,
+            'weight_decay':args.weight_decay
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if p.requires_grad and any(nd in n for nd in no_decay)],
+            'lr': args.lr,
+            'weight_decay':0
+        }
+    ]
     model.set_grouped_parameters(optimizer_grouped_parameters)
     model.train()
     print_title("Start Training...")
@@ -133,6 +119,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", type=str, choices = ["nq","zsRE"], default = "nq")
     parser.add_argument("--n_gpus", type=int, default=4)
 
     parser.add_argument("--train_path", type=str,
@@ -149,16 +136,10 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--max_source_len", type=int, default=25)
     parser.add_argument("--max_target_len", type=int, default=10)
-    parser.add_argument("--method", type=str, choices=[
-                        "ft", "rec", "LoRA", "Ours+LoRA"], required=True)
-
-    # args for Rec
-    parser.add_argument("--rec_anneal_fun", type=str, default="sigmoid")
-    parser.add_argument("--rec_anneal_k", type=float, default=0.5)
-    parser.add_argument("--rec_anneal_t0", type=float, default=10.0)
-    parser.add_argument("--rec_anneal_w", type=float, default=1.0)
-    parser.add_argument("--rec_pretrain_cof", type=float, default=5000.0)
-
+    parser.add_argument("--adapter", type=str, choices=[
+                        "LoRA", "K-adapter", "None"], default="LoRA")
+    parser.add_argument("--freeze_orig_param", type=str, choices=["Encoder", "Decoder", "All", "None"], default = "All")
+    
     # args for LoRA
     parser.add_argument("--lora_rank", type=int, default=256)
     parser.add_argument("--lora_attn_alpha", type=int, default=256*4)

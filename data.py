@@ -29,7 +29,6 @@ class QADataset(Dataset):
 
     def __getitem__(self, index: int):
         data_row = self.data.iloc[index]
-
         source_encoding = self.tokenizer(
             data_row["question"],
             max_length=self.source_max_token_len,
