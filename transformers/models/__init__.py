@@ -88,6 +88,7 @@ from . import (
     splinter,
     squeezebert,
     t5,
+    t5_for_k,
     tapas,
     transfo_xl,
     vision_encoder_decoder,

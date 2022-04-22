@@ -53,52 +53,53 @@ def main(args):
     if args.freeze_orig_param == "Encoder":
         # Freeze all encoder
         if args.adapter == "None" or args.adapter == "K-adapter":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "encoder" in n:
                     p.requires_grad = False
         # Freeze all encoder as there is no LoRA in encoder & freeze LoRA's 0 expert
         elif args.adapter == "LoRA":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "encoder" in n or ("lora" in n and ".0.weight" in n):
                     p.requires_grad = False
-    
     elif args.freeze_orig_param == "Decoder":
         # freeze all decoder
         if args.adapter == "None":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "decoder" in n:
                     p.requires_grad = False
         # freeze all decoder but not adapter's
         elif args.adapter == "LoRA":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "decoder" in n and not ("lora" in n and ".{}.weight".format(model.config.lora_expert_num-1) in n):
                     p.requires_grad = False
         # After you check Your K-adapter You must fill it TODO
         else:
-            #TODO
-            pass
-    
+            for n, p in model.named_parameters():
+                if("decoder" in n and "k_adapter" not in n):
+                    p.requires_grad = False
+
     elif args.freeze_orig_param == "All":
         # Just freeze all
         model.freeze()
         # unfreeze only adapter params(excluding previous experts)
         if args.adapter == "LoRA":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "lora" in n and ".{}.weight".format(model.config.lora_expert_num-1) in n:
                     p.requires_grad = True
         else:
-            #TODO
-            pass
-    #freeze only for LoRA ".0.weight" as it is not real params
+            for n, p in model.named_parameters():
+                if "k_adapter" in n:
+                    p.requires_grad = True
+    # freeze only for LoRA ".0.weight" as it is not real params
     else:
         if args.adapter == "LoRA":
-            for n,p in model.named_parameters():
+            for n, p in model.named_parameters():
                 if "lora" in n and ".0.weight" in n:
                     p.requires_grad = False
-    
+
     no_decay = ['bias', 'layer_norm.weight']
-    
-    #Set Optimizer grouped Parameters
+
+    # Set Optimizer grouped Parameters
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if p.requires_grad and not any(nd in n for nd in no_decay)],
@@ -119,7 +120,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, choices = ["nq","zsRE"], default = "nq")
+    parser.add_argument("--dataset", type=str,
+                        choices=["nq", "zsRE"], default="nq")
     parser.add_argument("--n_gpus", type=int, default=4)
 
     parser.add_argument("--train_path", type=str,
@@ -138,8 +140,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_target_len", type=int, default=10)
     parser.add_argument("--adapter", type=str, choices=[
                         "LoRA", "K-adapter", "None"], default="LoRA")
-    parser.add_argument("--freeze_orig_param", type=str, choices=["Encoder", "Decoder", "All", "None"], default = "All")
-    
+    parser.add_argument("--freeze_orig_param", type=str,
+                        choices=["Encoder", "Decoder", "All", "None"], default="All")
+
     # args for LoRA
     parser.add_argument("--lora_rank", type=int, default=256)
     parser.add_argument("--lora_attn_alpha", type=int, default=256*4)
@@ -148,7 +151,6 @@ if __name__ == "__main__":
     parser.add_argument("--lora_dropout", type=float, default=0.1)
     parser.add_argument("--lora_r_dropout", type=float, default=0.1)
     parser.add_argument("--ours_threshold", type=float, default=0.9)
-    # parser.add_argument("--lora_expert_num", type=int, default=6)
 
     parser.add_argument("--out_dir", type=str, default="checkpoints")
 
