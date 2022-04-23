@@ -4,6 +4,8 @@ outputs
 kill.sh
 run.sh
 test.py
+generate.py
+para_diff.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

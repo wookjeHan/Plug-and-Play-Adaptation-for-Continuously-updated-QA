@@ -1568,9 +1568,6 @@ class AdapterStack(T5PreTrainedModel):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        # print("DECODER SHAPE")
-        # print(all_hidden_states.shape)
-        # quit()
         if not return_dict:
             return tuple(
                 v
@@ -1598,16 +1595,8 @@ class Adapter(nn.Module):
         self.adapter_config = adapter_config
         self.adapter_size = adapter_config.d_model
         self.adapter_initializer_range = 0.0002
-        # self.down_project = nn.Linear(
-        #     self.adapter_config.d_model,
-        #     self.adapter_size,
-        # )
 
         self.stack = AdapterStack(adapter_config)
-
-        # self.up_project = nn.Linear(self.adapter_size, adapter_config.d_model)
-
-        # self.init_weights()
 
     def forward(self, hidden_states, attention_mask, encoder_hidden_states=None, encoder_attention_mask=None, inputs_embeds=None):
 
@@ -1631,44 +1620,18 @@ class Adapter(nn.Module):
 
             # If a 2D ou 3D attention mask is provided for the cross-attention
             # we need to make broadcastabe to [batch_size, num_heads, seq_length, seq_length]
-            if decoder_attention_mask.dim() == 3:
-                decoder_extended_attention_mask = decoder_attention_mask[:, None, :, :]
-            if decoder_attention_mask.dim() == 2:
-                decoder_extended_attention_mask = decoder_attention_mask[:, None, None, :]
+            # if decoder_attention_mask.dim() == 3:
+            #     decoder_extended_attention_mask = decoder_attention_mask[:, None, :, :]
+            # if decoder_attention_mask.dim() == 2:
+            #     decoder_extended_attention_mask = decoder_attention_mask[:, None, None, :]
 
             stack_outputs = self.stack(
                 ipt_hidden_states,
-                attention_mask=None,
+                attention_mask=decoder_attention_mask,
                 head_mask=head_mask,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
                 inputs_embeds=inputs_embeds
-            )
-        else:
-            attention_mask = torch.ones(input_shape).to(hidden_states.device)
-            encoder_attention_mask = torch.ones(
-                input_shape).to(hidden_states.device)
-            if attention_mask.dim() == 3:
-                extended_attention_mask = attention_mask[:, None, :, :]
-
-            if attention_mask.dim() == 2:
-                extended_attention_mask = attention_mask[:, None, None, :]
-            extended_attention_mask = extended_attention_mask.to(
-                dtype=next(self.parameters()).dtype)  # fp16 compatibility
-            extended_attention_mask = (
-                1.0 - extended_attention_mask) * -10000.0
-
-            # If a 2D ou 3D attention mask is provided for the cross-attention
-            # we need to make broadcastabe to [batch_size, num_heads, seq_length, seq_length]
-            if encoder_attention_mask.dim() == 3:
-                encoder_extended_attention_mask = encoder_attention_mask[:, None, :, :]
-            if encoder_attention_mask.dim() == 2:
-                encoder_extended_attention_mask = encoder_attention_mask[:, None, None, :]
-
-            stack_outputs = self.stack(
-                ipt_hidden_states,
-                attention_mask=extended_attention_mask,
-                head_mask=head_mask
             )
         hidden_states = stack_outputs[0]
         return hidden_states
@@ -1711,10 +1674,10 @@ class T5ForConditionalGeneration_For_K(T5PreTrainedModel):
         self.k_adapter_decoder = nn.ModuleList(
             [Adapter(AdapterConfig) for _ in range(self.adapter_num)])
 
-        # self.k_adapter_com_dense_decoder = nn.Linear(
-        #     self.config.d_model * 2, self.config.d_model)
-        # self.k_adapter_com_dense_decoder.weight.data.zero_()
-        # self.k_adapter_com_dense_decoder.bias.data.zero_()
+        self.k_adapter_com_dense_decoder = nn.Linear(
+            self.config.d_model * 2, self.config.d_model)
+        self.k_adapter_com_dense_decoder.weight.data.zero_()
+        self.k_adapter_com_dense_decoder.bias.data.zero_()
 
         # Model parallel
         self.model_parallel = False
@@ -1881,7 +1844,7 @@ class T5ForConditionalGeneration_For_K(T5PreTrainedModel):
         )
         sequence_output = decoder_outputs[0]  # (batch,target_len,1024)
 
-        # 25,(batch,target_len,1024)
+        # layer_num,(batch,target_len,1024)
         all_hidden_states = decoder_outputs['hidden_states']
 
         assert switch_labels is not None or switches is not None, "switch labels or switchess should be not None"
@@ -1900,7 +1863,8 @@ class T5ForConditionalGeneration_For_K(T5PreTrainedModel):
                                                 encoder_attention_mask=attention_mask,
                                                 inputs_embeds=decoder_inputs_embeds)  # (batch, target len, 1024)
         # drop below parameters when doing downstream tasks
-        sequence_output_delta = hidden_states_last * coeff
+        sequence_output_delta = self.k_adapter_com_dense_decoder(
+            torch.cat([sequence_output, hidden_states_last], dim=2)) * coeff
         sequence_output = sequence_output + \
             sequence_output_delta  # (batch,1,dim)
 

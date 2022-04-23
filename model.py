@@ -22,18 +22,17 @@ def load_model_tokenizer(args):
                 args.init_checkpoint, strict=False, model_name=model_name, tokenizer=tokenizer, args=args)
         return model, tokenizer
     else:
-        if args.dataset == "nq":
-            if args.checkpoint is None:
-                if args.adapter == "LoRA":
-                    args.lora_expert_num = 2
-                    model = QAModel_LoRA(
-                        model_name=model_name, tokenizer=tokenizer, args=args)
-                elif args.adapter == "K-adapter":
-                    model = QAModel_K(model_name=model_name,
-                                      tokenizer=tokenizer, args=args)
-                else:
-                    model = QAModel(model_name=model_name,
-                                    tokenizer=tokenizer, args=args)
+        if args.dataset == "nq" and args.checkpoint is None:
+            if args.adapter == "LoRA":
+                args.lora_expert_num = 2
+                model = QAModel_LoRA(
+                    model_name=model_name, tokenizer=tokenizer, args=args)
+            elif args.adapter == "K-adapter":
+                model = QAModel_K(model_name=model_name,
+                                  tokenizer=tokenizer, args=args)
+            else:
+                model = QAModel(model_name=model_name,
+                                tokenizer=tokenizer, args=args)
         else:
             assert args.checkpoint is not None and os.path.exists(
                 args.checkpoint), "Must set model's valid checkpoint to be evaluated"
@@ -235,7 +234,7 @@ class QAModel_K(pl.LightningModule):
         switch_labels = torch.tensor(
             [1 for i in range(input_ids.shape[0])], device=self.device
         )
-        _, avg_embedding = _, avg_embedding = self.model.expert_prepare(
+        _, avg_embedding = self.model.expert_prepare(
             input_ids=input_ids, attention_mask=attention_mask)
         loss, _ = self(input_ids, attention_mask,
                        labels, switches=switch_labels)
@@ -290,6 +289,7 @@ class QAModel_K(pl.LightningModule):
                         pred, tensor.transpose(1, 0).to(self.device))
                     mx, ind = torch.max(score_cand, dim=1)  # (batch, )
                     # score is list of tensor which shape is (batch,)
+                    # list of (batch,) len = len(embedding_memory)
                     scores.append(mx)
                 mx_scores = []
                 for i in range(input_ids.shape[0]):
