@@ -1,4 +1,4 @@
-# Continual-Plug-and-Adapt-for-CuQA 
+# Plug-and-Play Adaptation for Continuously-updated QA
 This includes an implementation of ["Plug-and-Play Adaptation for Continuously-updated QA"](https://arxiv.org/abs/2204.12785) 
 
 ### Executing program
