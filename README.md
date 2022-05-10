@@ -30,6 +30,8 @@ To evaluate the model, please use the following command
 ```
 python eval.py --checkpoint $model_checkpoint --dev_path $dev_path --adapter $adapter
 ```
+Here are some arguments(included but not all) which might be useful.
+
 * `--checkpoint`: parameters of original model which will be freeze while updating
 * `--adapter`: type of adapter which was exploited when updating or pretraining
 * `--ours_threshold`: threshold when judging whether the data is from source or not
